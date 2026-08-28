@@ -95,22 +95,18 @@ var (
 			[]string{phpfpmSocketPathLabel}, nil),
 	}
 
-	phpfpmStateGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "php",
-			Subsystem: "fpm",
-			Name:      "state_count",
-			Help:      "Count of PHP-FPM processes in each state.",
-		},
-		[]string{phpfpmSocketPathLabel, "state"},
-	)
+	phpfpmStateCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName("php", "fpm", "state_count"),
+		"Count of PHP-FPM processes in each state.",
+		[]string{phpfpmSocketPathLabel, "state"}, nil)
 )
 
 func CollectStatusFromReader(reader io.Reader, socketPath string, ch chan<- prometheus.Metric) error {
 	scanner := bufio.NewScanner(reader)
 	re := regexp.MustCompile("^(.*): +(.*)$")
 
-	// Map to store the counts of each state
+	// Counts of each state seen in this scrape only, so a state that
+	// disappears between scrapes doesn't linger at its last value.
 	stateCounts := make(map[string]float64)
 
 	// Scrape the interesting values:
@@ -165,9 +161,18 @@ func CollectStatusFromReader(reader io.Reader, socketPath string, ch chan<- prom
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
 	// Export the state counts as metrics
 	for state, count := range stateCounts {
-		phpfpmStateGauge.WithLabelValues(socketPath, state).Set(count)
+		ch <- prometheus.MustNewConstMetric(
+			phpfpmStateCountDesc,
+			prometheus.GaugeValue,
+			count,
+			socketPath,
+			state)
 	}
 
 	return nil
@@ -208,47 +213,57 @@ func CollectMetricsFromScript(socketPaths []*SocketPath, scriptPaths []string) (
 
 	for _, socketPath := range socketPaths {
 		for _, scriptPath := range scriptPaths {
-			fcgi, err := fcgiclient.Dial(socketPath.Network, socketPath.Address)
+			metricFamilies, err := collectMetricsFromScriptOnce(socketPath, scriptPath)
 			if err != nil {
 				return result, err
 			}
-			defer fcgi.Close()
-
-			env := make(map[string]string)
-			env["DOCUMENT_ROOT"] = path.Dir(scriptPath)
-			env["SCRIPT_FILENAME"] = scriptPath
-			env["SCRIPT_NAME"] = path.Base(scriptPath)
-			env["REQUEST_METHOD"] = "GET"
-
-			resp, err := fcgi.Get(env)
-			if err != nil {
-				return result, err
-			}
-
-			var parser expfmt.TextParser
-			metricFamilies, err := parser.TextToMetricFamilies(resp.Body)
-			if err != nil {
-				return result, err
-			}
-
-			for _, metricFamily := range metricFamilies {
-				for _, metric := range metricFamily.Metric {
-					socketPathCopy := socketPath.FormatStr()
-					scriptPathCopy := scriptPath
-					metric.Label = append(
-						metric.Label,
-						&client_model.LabelPair{
-							Name:  &phpfpmSocketPathLabel,
-							Value: &socketPathCopy,
-						},
-						&client_model.LabelPair{
-							Name:  &phpfpmScriptPathLabel,
-							Value: &scriptPathCopy,
-						})
-				}
-				result = append(result, metricFamily)
-			}
+			result = append(result, metricFamilies...)
 		}
+	}
+	return result, nil
+}
+
+func collectMetricsFromScriptOnce(socketPath *SocketPath, scriptPath string) ([]*client_model.MetricFamily, error) {
+	fcgi, err := fcgiclient.Dial(socketPath.Network, socketPath.Address)
+	if err != nil {
+		return nil, err
+	}
+	defer fcgi.Close()
+
+	env := make(map[string]string)
+	env["DOCUMENT_ROOT"] = path.Dir(scriptPath)
+	env["SCRIPT_FILENAME"] = scriptPath
+	env["SCRIPT_NAME"] = path.Base(scriptPath)
+	env["REQUEST_METHOD"] = "GET"
+
+	resp, err := fcgi.Get(env)
+	if err != nil {
+		return nil, err
+	}
+
+	var parser expfmt.TextParser
+	metricFamilies, err := parser.TextToMetricFamilies(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*client_model.MetricFamily
+	for _, metricFamily := range metricFamilies {
+		for _, metric := range metricFamily.Metric {
+			socketPathCopy := socketPath.FormatStr()
+			scriptPathCopy := scriptPath
+			metric.Label = append(
+				metric.Label,
+				&client_model.LabelPair{
+					Name:  &phpfpmSocketPathLabel,
+					Value: &socketPathCopy,
+				},
+				&client_model.LabelPair{
+					Name:  &phpfpmScriptPathLabel,
+					Value: &scriptPathCopy,
+				})
+		}
+		result = append(result, metricFamily)
 	}
 	return result, nil
 }
@@ -269,6 +284,7 @@ func (e *PhpfpmExporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- phpfpmUpDesc
 	ch <- phpfpmAcceptedConnections
 	ch <- phpfpmStartTime
+	ch <- phpfpmStateCountDesc
 	for _, desc := range phpfpmGauges {
 		ch <- desc
 	}
@@ -355,7 +371,6 @@ func main() {
 		panic(err)
 	}
 	prometheus.MustRegister(exporter)
-	prometheus.MustRegister(phpfpmStateGauge)
 
 	gatherer := prometheus.DefaultGatherer
 	if len(*scriptCollectorPaths) != 0 {
