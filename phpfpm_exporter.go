@@ -94,17 +94,37 @@ var (
 			"Enable php-fpm slow-log before you consider this. If this value is non-zero you may have slow php processes.",
 			[]string{phpfpmSocketPathLabel}, nil),
 	}
+
+	phpfpmStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "php",
+			Subsystem: "fpm",
+			Name:      "state_count",
+			Help:      "Count of PHP-FPM processes in each state.",
+		},
+		[]string{phpfpmSocketPathLabel, "state"},
+	)
 )
 
 func CollectStatusFromReader(reader io.Reader, socketPath string, ch chan<- prometheus.Metric) error {
 	scanner := bufio.NewScanner(reader)
 	re := regexp.MustCompile("^(.*): +(.*)$")
 
+	// Map to store the counts of each state
+	stateCounts := make(map[string]float64)
+
 	// Scrape the interesting values:
 	for scanner.Scan() {
 		fields := re.FindStringSubmatch(scanner.Text())
+		//fmt.Println(fields)
 		if fields == nil {
-			return fmt.Errorf("Failed to parse %s", scanner.Text())
+			continue // Can't return error since there are 2 rows empy and asterisks
+			//return fmt.Errorf("Failed to parse %s", scanner.Text())
+		}
+
+		if fields[1] == "state" {
+			// Increment the count for the state
+			stateCounts[fields[2]]++
 		}
 
 		if gauge, ok := phpfpmGauges[fields[1]]; ok {
@@ -144,6 +164,12 @@ func CollectStatusFromReader(reader io.Reader, socketPath string, ch chan<- prom
 				socketPath)
 		}
 	}
+
+	// Export the state counts as metrics
+	for state, count := range stateCounts {
+		phpfpmStateGauge.WithLabelValues(socketPath, state).Set(count)
+	}
+
 	return nil
 }
 
@@ -153,6 +179,7 @@ func CollectStatusFromSocket(path *SocketPath, statusPath string, ch chan<- prom
 	env["SCRIPT_FILENAME"] = statusPath
 	env["SCRIPT_NAME"] = statusPath
 	env["REQUEST_METHOD"] = "GET"
+	env["QUERY_STRING"] = "full"
 
 	fcgi, err := fcgiclient.Dial(path.Network, path.Address)
 	if err != nil {
@@ -164,8 +191,16 @@ func CollectStatusFromSocket(path *SocketPath, statusPath string, ch chan<- prom
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
-	return CollectStatusFromReader(resp.Body, path.FormatStr(), ch)
+	// Read and print the full response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	//fmt.Println("Full response body from socket:", string(body))
+
+	return CollectStatusFromReader(strings.NewReader(string(body)), path.FormatStr(), ch)
 }
 
 func CollectMetricsFromScript(socketPaths []*SocketPath, scriptPaths []string) ([]*client_model.MetricFamily, error) {
@@ -318,6 +353,7 @@ func main() {
 		panic(err)
 	}
 	prometheus.MustRegister(exporter)
+	prometheus.MustRegister(phpfpmStateGauge)
 
 	gatherer := prometheus.DefaultGatherer
 	if len(*scriptCollectorPaths) != 0 {
