@@ -1,9 +1,7 @@
-# PHP-FPM Exporter for Prometheus [![Build Status][buildstatus]][circleci]
+# PHP-FPM Exporter for Prometheus
 
-[![GitHub release](https://img.shields.io/github/release/Lusitaniae/phpfpm_exporter.svg)][release]
-![GitHub Downloads](https://img.shields.io/github/downloads/Lusitaniae/phpfpm_exporter/total.svg)
-[![Docker Repository on Quay](https://quay.io/repository/Lusitaniae/phpfpm-exporter/status)][quay]
-[![Docker Pulls](https://img.shields.io/docker/pulls/lusotycoon/phpfpm-exporter.svg?maxAge=604800)][hub]
+[![GitHub release](https://img.shields.io/github/release/123-soleil/phpfpm_exporter.svg)][release]
+![GitHub Downloads](https://img.shields.io/github/downloads/123-soleil/phpfpm_exporter/total.svg)
 
 Prometheus Exporter for the PHP-FPM status page.
 
@@ -103,8 +101,3 @@ Basic:
 Multi Pool:
 ![multi pool](https://grafana.com/api/dashboards/5714/images/3608/image)
 
-[buildstatus]: https://circleci.com/gh/Lusitaniae/phpfpm_exporter/tree/master.svg?style=shield
-[circleci]: https://circleci.com/gh/Lusitaniae/phpfpm_exporter
-[quay]: https://quay.io/repository/Lusitaniae/phpfpm-exporter
-[hub]: https://hub.docker.com/r/lusotycoon/phpfpm-exporter/
-[release]: https://github.com/Lusitaniae/phpfpm_exporter/releases/latest
