@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build, vet, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (race detector)
+        run: go test -race -count=1 ./...
+
+      - name: Check metrics fixtures (promtool)
+        run: |
+          for file in test/*.metrics; do
+            docker run --rm -i -v "$PWD:$PWD" -w "$PWD" \
+              --entrypoint promtool quay.io/prometheus/prometheus:latest \
+              check metrics < "$file"
+          done
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build linux/amd64 binary
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p .build/linux-amd64
+          go build -a -tags netgo -o .build/linux-amd64/phpfpm_exporter .
+
+      - name: Build image
+        run: docker build -t phpfpm_exporter:ci .
