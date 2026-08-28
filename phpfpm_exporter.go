@@ -28,13 +28,13 @@ import (
 
 	"path/filepath"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	client_model "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/version"
 	"github.com/tomasen/fcgi_client"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -318,6 +318,8 @@ func NewSocketPath(socketPath string) *SocketPath {
 func main() {
 	var (
 		listenAddress        = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9253").String()
+		tlsCert              = kingpin.Flag("web.tls-cert", "[Optional] Path to TLS cert. Must be used with web.tls-key").Default("").String()
+		tlsKey               = kingpin.Flag("web.tls-key", "[Optional} Path to TLS key. Must be used with web.tls-cert").Default("").String()
 		metricsPath          = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
 		socketPaths          = kingpin.Flag("phpfpm.socket-paths", "Paths of the PHP-FPM sockets.").Strings()
 		socketDirectories    = kingpin.Flag("phpfpm.socket-directories", "Path(s) of the directory where PHP-FPM sockets are located.").Strings()
@@ -380,5 +382,9 @@ func main() {
 			</body>
 			</html>`))
 	})
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	if *tlsCert != "" && *tlsKey != "" {
+		log.Fatal(http.ListenAndServeTLS(*listenAddress, *tlsCert, *tlsKey, nil))
+	} else {
+		log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	}
 }
