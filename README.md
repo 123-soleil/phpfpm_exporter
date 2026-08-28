@@ -1,6 +1,6 @@
 # PHP-FPM Exporter for Prometheus
 
-[![GitHub release](https://img.shields.io/github/release/123-soleil/phpfpm_exporter.svg)][release]
+![GitHub release](https://img.shields.io/github/release/123-soleil/phpfpm_exporter.svg)
 ![GitHub Downloads](https://img.shields.io/github/downloads/123-soleil/phpfpm_exporter/total.svg)
 
 Prometheus Exporter for the PHP-FPM status page.
